@@ -18,7 +18,9 @@ use std::collections::BTreeMap;
 use headroom_core::signals::{
     ImportanceCategory, ImportanceContext, KeywordDetector, KeywordRegistry, LineImportanceDetector,
 };
-use headroom_core::transforms::smart_crusher::compaction::DocumentCompactor;
+use headroom_core::transforms::smart_crusher::compaction::{
+    ClassifyConfig, CompactConfig, DocumentCompactor,
+};
 use headroom_core::transforms::smart_crusher::{
     CrushResult as RustCrushResult, SmartCrusher as RustSmartCrusher,
     SmartCrusherConfig as RustSmartCrusherConfig,
@@ -847,10 +849,25 @@ impl PySmartCrusher {
         // Heavy: JSON parse + recursive walker + tabular compaction +
         // re-serialize. None of it touches Python; release the GIL.
         let doc_json = doc_json.to_string();
+        // Honor the crusher's CCR gate on the document-walker path too. The
+        // `DocumentCompactor` defaults to `emit_opaque_markers: true`, so
+        // without this it would substitute long string cells with
+        // `<<ccr:...>>` markers even when the caller disabled CCR — a lossy
+        // removal the caller explicitly opted out of (and the row-drop /
+        // per-array paths already honor via `crusher.rs`). Fixes the
+        // opaque-blob leak on `compact_document_json`.
+        let emit_opaque = self.inner.config.enable_ccr_marker;
         py.allow_threads(|| {
             let parsed: serde_json::Value = serde_json::from_str(&doc_json)
                 .unwrap_or_else(|e| panic!("doc_json must be JSON: {e}"));
-            let mut dc = DocumentCompactor::new();
+            let compact_cfg = CompactConfig {
+                classify: ClassifyConfig {
+                    emit_opaque_markers: emit_opaque,
+                    ..ClassifyConfig::default()
+                },
+                ..CompactConfig::default()
+            };
+            let mut dc = DocumentCompactor::new().with_config(compact_cfg);
             if let Some(store) = self.inner.ccr_store() {
                 dc = dc.with_ccr_store(store.clone());
             }
