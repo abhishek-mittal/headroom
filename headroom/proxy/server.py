@@ -595,6 +595,11 @@ class HeadroomProxy(
     def __init__(self, config: ProxyConfig):
         self.config = config
         self.config.mode = normalize_proxy_mode(self.config.mode)
+        # Record process-wide stateless mode so module-level persisters
+        # (output-savings recorder, etc.) can skip workspace writes.
+        from headroom import paths as _hr_paths
+
+        _hr_paths.set_process_stateless(config.stateless)
         # Stateless: keep TOIN learning in-memory; never touch toin.json.
         _apply_stateless_persistence(self.config)
         pipeline_extensions = list(config.pipeline_extensions or [])
@@ -974,7 +979,16 @@ class HeadroomProxy(
 
         # Memory Handler (persistent user memory)
         self.memory_handler: MemoryHandler | None = None
-        if config.memory_enabled:
+        if config.memory_enabled and config.stateless:
+            # Persistent memory writes a SQLite DB + markdown files to disk,
+            # which stateless mode forbids. Memory is cross-session learning and
+            # is contradictory with an ephemeral/read-only deployment, so we
+            # disable it rather than persist. Run without --stateless to use it.
+            logger.warning(
+                "Memory is disabled in stateless mode (it persists to disk). "
+                "Run without --stateless to enable persistent memory."
+            )
+        elif config.memory_enabled:
             # Resolve memory DB path: empty → project-scoped default
             _mem_db_path = config.memory_db_path
             if not _mem_db_path:
