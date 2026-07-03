@@ -8,7 +8,8 @@ using only reversible / data-preserving transforms:
 * LOG            -> ANSI strip + run-collapse [byte-lossless modulo ANSI color]
 * JSON           -> whitespace-minify         [data-lossless; NOT byte-exact]
 
-Source code and glob path-lists match nothing -> untouched. Off by default.
+Source code and glob path-lists match nothing -> untouched. Always on
+(byte/data-lossless, so it needs no feature gate) in every path.
 """
 
 from __future__ import annotations
@@ -45,8 +46,8 @@ def tokenizer():
     return Tokenizer(provider.get_token_counter("gpt-4o"), "gpt-4o")
 
 
-def _compact(content: str, on: bool = True):
-    router = ContentRouter(ContentRouterConfig(compact_excluded_lossless=on))
+def _compact(content: str):
+    router = ContentRouter(ContentRouterConfig())
     return router._lossless_compact_excluded(content)
 
 
@@ -79,15 +80,11 @@ def test_source_and_glob_untouched():
     assert _compact(GLOB) is None
 
 
-def test_off_by_default():
-    assert _compact(GREP, on=False) is None
-
-
 # --- end-to-end through the router pipeline (excluded tools) ---
 
 
-def _run(content: str, tool: str, on: bool, tokenizer):
-    router = ContentRouter(ContentRouterConfig(compact_excluded_lossless=on))
+def _run(content: str, tool: str, tokenizer):
+    router = ContentRouter(ContentRouterConfig())
     messages = [
         {
             "role": "assistant",
@@ -99,30 +96,24 @@ def _run(content: str, tool: str, on: bool, tokenizer):
     return result.messages[1]["content"], result.transforms_applied
 
 
-def test_pipeline_verbatim_by_default(tokenizer):
-    out, transforms = _run(GREP, "grep", False, tokenizer)
-    assert out == GREP
-    assert not any("lossless" in t for t in transforms)
-
-
 def test_pipeline_folds_grep_and_recovers(tokenizer):
-    out, transforms = _run(GREP, "grep", True, tokenizer)
+    out, transforms = _run(GREP, "grep", tokenizer)
     assert "router:excluded:lossless_search" in transforms
     assert search_unheading(out) == GREP
 
 
 def test_pipeline_compacts_log_read(tokenizer):
-    out, transforms = _run(LOG, "read", True, tokenizer)
+    out, transforms = _run(LOG, "read", tokenizer)
     assert "router:excluded:lossless_log" in transforms
     assert expand_runs(out) == strip_ansi(LOG)
 
 
 def test_pipeline_minifies_json_read(tokenizer):
-    out, transforms = _run(JSON, "read", True, tokenizer)
+    out, transforms = _run(JSON, "read", tokenizer)
     assert "router:excluded:lossless_json" in transforms
     assert json.loads(out) == json.loads(JSON)
 
 
 def test_pipeline_leaves_source_read_untouched(tokenizer):
-    out, _ = _run(CODE, "read", True, tokenizer)
+    out, _ = _run(CODE, "read", tokenizer)
     assert out == CODE

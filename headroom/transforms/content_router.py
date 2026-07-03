@@ -889,19 +889,11 @@ class ContentRouterConfig:
     # Set to None to use DEFAULT_EXCLUDE_TOOLS, or provide custom set
     exclude_tools: set[str] | None = None
 
-    # For EXCLUDED tools, still apply information-preserving compaction by
-    # detected shape (excluded tools are protected only from *lossy*
-    # compression, for accuracy):
-    #   * SEARCH (grep path:line:content) -> ripgrep --heading fold. Byte-exact.
-    #   * LOG (build/test/app logs)       -> ANSI strip + run-collapse. Byte-
-    #                                        exact modulo non-semantic ANSI.
-    #   * JSON                            -> whitespace-minify. DATA-lossless
-    #                                        (same object) but NOT byte-exact —
-    #                                        a read-then-Edit(old_string) on the
-    #                                        same JSON file could miss.
-    # No-op on source code / glob path-lists. Off by default. Closes the
-    # OpenCode native-Grep/Read gap that RTK (shell-only, lossy) misses.
-    compact_excluded_lossless: bool = False
+    # Excluded tools are protected only from *lossy* compression. Their output
+    # is still given information-preserving compaction by detected shape (grep
+    # -> ripgrep --heading fold; logs -> ANSI strip + run-collapse; JSON ->
+    # whitespace-minify), in every path — see ``_lossless_compact_excluded``.
+    # This is always safe (byte/data-lossless) so it needs no config gate.
 
     # Read lifecycle management (stale/superseded detection)
     read_lifecycle: ReadLifecycleConfig = field(default_factory=ReadLifecycleConfig)
@@ -2872,9 +2864,6 @@ class ContentRouter(Transform):
             kwargs.get("force_kompress", self.config.force_kompress_all)
         )
         self._runtime_kompress_model: str | None = kwargs.get("kompress_model")
-        self._runtime_compact_excluded_lossless: bool = bool(
-            kwargs.get("compact_excluded_lossless", self.config.compact_excluded_lossless)
-        )
         # F2.2: capture the per-request CompressionPolicy so
         # ``_record_to_toin`` can gate TOIN writes on
         # ``policy.toin_read_only``. ``None`` when the caller didn't
@@ -3452,12 +3441,10 @@ class ContentRouter(Transform):
 
         Returns ``(compacted, kind)`` when a recognized shape actually shrinks,
         else ``None``. Source code and glob path-lists match nothing -> verbatim.
-        Never raises.
+        Always safe to run — the transforms are byte/data-lossless — so there is
+        no feature gate: excluded tool output is compacted in every path. Never
+        raises.
         """
-        if not getattr(
-            self, "_runtime_compact_excluded_lossless", self.config.compact_excluded_lossless
-        ):
-            return None
         if not isinstance(content, str) or len(content) < 200:
             return None
         try:
