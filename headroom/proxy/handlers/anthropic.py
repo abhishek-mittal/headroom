@@ -38,6 +38,34 @@ from headroom.proxy.outcome import RequestOutcome
 logger = logging.getLogger("headroom.proxy")
 
 
+def _strip_streaming_only_content_fields(messages: Any) -> None:
+    """Remove streaming-only ``index`` keys from request content blocks, in place.
+
+    ``index`` is a field Anthropic emits on streaming RESPONSE content-block deltas
+    (see proxy/handlers/streaming.py). It is not part of the request-message schema, so
+    forwarding it upstream triggers a 400 ("...content.N.text.index: Extra inputs are
+    not permitted") that aborts multi-turn sessions once a client echoes a reconstructed
+    assistant turn back. Strip it (including nested tool_result content) so requests are
+    always schema-valid.
+    """
+    if not isinstance(messages, list):
+        return
+    for message in messages:
+        if isinstance(message, dict):
+            _strip_index_from_content_blocks(message.get("content"))
+
+
+def _strip_index_from_content_blocks(content: Any) -> None:
+    if not isinstance(content, list):
+        return
+    for block in content:
+        if isinstance(block, dict):
+            block.pop("index", None)
+            # tool_result blocks nest their own content list of blocks.
+            _strip_index_from_content_blocks(block.get("content"))
+
+
+
 class AnthropicHandlerMixin:
     """Mixin providing Anthropic API handler methods for HeadroomProxy."""
 
@@ -636,6 +664,16 @@ class AnthropicHandlerMixin:
                 body["model"] = model
                 body_mutation_tracker.mark_mutated("sanitize_model_id")
             messages = body.get("messages", [])
+            # Strip streaming-only "index" keys from request content blocks BEFORE any
+            # prefix-cache tracking or compression. The proxy's streaming reconstruction
+            # tags assistant blocks with an "index" for SSE re-emission; clients (e.g.
+            # opencode) persist that assistant message and echo it back next turn, but
+            # "index" is a response-delta field that Anthropic REJECTS in a request
+            # ("messages.N.content.0.text.index: Extra inputs are not permitted", 400),
+            # aborting multi-turn sessions. Canonicalizing here (in place, so body,
+            # original, forwarded, and the recorded/replayed prefix are all identical)
+            # keeps it cache-safe: overlay_cached_prefix replays the same stripped bytes.
+            _strip_streaming_only_content_fields(messages)
             pipeline_provider = provider_name
             pipeline_path = request.url.path if upstream_base_url else "/v1/messages"
             pipeline_stream = bool(body.get("stream", False) or force_stream)
@@ -1940,6 +1978,14 @@ class AnthropicHandlerMixin:
                 if remembered_event.headers is not None:
                     headers = remembered_event.headers
 
+            # Final sanitization of the FORWARDED body: strip streaming-only "index"
+            # keys from content blocks. In cache mode the forwarded prefix is replayed
+            # from Headroom's own recorded/reconstructed messages (streaming.py tags
+            # blocks with "index"), so the inbound-side strip above doesn't cover it —
+            # this catches both the client-echoed and the cache-replayed forms. Applied
+            # deterministically to the exact bytes forwarded (and thus recorded as the
+            # next prefix), so Anthropic always caches/matches the same stripped prefix.
+            _strip_streaming_only_content_fields(optimized_messages)
             # Update body
             body["messages"] = optimized_messages
             if tools or _original_tools is not None:
