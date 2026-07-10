@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from headroom import paths as _paths
 from headroom._subprocess import run
+from headroom.proxy import query_log_policy
 from headroom.proxy.body_forwarding import (
     BodyMutationTracker as BodyMutationTracker,  # noqa: F401 - compatibility export
 )
@@ -262,8 +263,7 @@ def hash_query_for_log(query: str) -> str:
 
     Uses BLAKE2b truncated to 16 hex chars. Never logs the raw query content.
     """
-    h = hashlib.blake2b(query.encode("utf-8", errors="replace"), digest_size=8)
-    return h.hexdigest()
+    return query_log_policy.hash_query_for_log(query)
 
 
 def extract_tags(headers: Any) -> dict[str, str]:
