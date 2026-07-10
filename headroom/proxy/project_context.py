@@ -20,6 +20,7 @@ from contextvars import ContextVar
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
+from headroom.proxy.request_scope import normalize_scope_path
 from headroom.proxy.savings_tracker import sanitize_project_name
 
 PROJECT_HEADER = "x-headroom-project"
@@ -73,9 +74,7 @@ def strip_project_path_prefix(scope: MutableMapping[str, Any]) -> str | None:
     """
     project, stripped = split_project_path(scope.get("path", ""))
     if project is not None:
-        scope["path"] = stripped
-        if "raw_path" in scope:
-            scope["raw_path"] = quote(stripped).encode("ascii")
+        normalize_scope_path(scope, stripped)
     return project
 
 
