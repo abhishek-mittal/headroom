@@ -89,6 +89,6 @@ async def handle_chatgpt_codex_responses_subpath(
             status_code=resp.status_code,
             headers=dict(resp.headers),
         )
-    except Exception as exc:
-        logger.error("Passthrough /v1/responses/%s failed: %s", sub_path, exc)
-        return Response(content=str(exc), status_code=502)
+    except Exception:
+        logger.exception("Passthrough /v1/responses/%s failed", sub_path)
+        return Response(content="Upstream request failed.", status_code=502)

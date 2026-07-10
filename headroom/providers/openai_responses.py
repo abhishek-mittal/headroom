@@ -13,6 +13,11 @@ from fastapi.responses import Response
 logger = logging.getLogger("headroom.providers.openai.responses")
 
 
+def _sanitize_for_log(value: str) -> str:
+    """Return a log-safe single-line representation of untrusted text."""
+    return value.replace("\r", "").replace("\n", "")
+
+
 @dataclass(frozen=True, slots=True)
 class OpenAIResponsesSubpathRoute:
     """Responses API subpath alias exposed by provider route registration."""
@@ -82,5 +87,9 @@ async def handle_openai_responses_subpath(
             headers=dict(resp.headers),
         )
     except Exception as exc:
-        logger.error("Passthrough /v1/responses/%s failed: %s", sub_path, exc)
+        logger.error(
+            "Passthrough /v1/responses/%s failed: %s",
+            _sanitize_for_log(sub_path),
+            exc,
+        )
         return Response(content=str(exc), status_code=502)

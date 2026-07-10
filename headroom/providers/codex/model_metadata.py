@@ -381,6 +381,6 @@ async def handle_chatgpt_model_metadata(
             status_code=resp.status_code,
             headers=dict(resp.headers),
         )
-    except Exception as exc:
-        logger.error("Passthrough %s failed: %s", upstream_path, exc)
-        return Response(content=str(exc), status_code=502)
+    except Exception:
+        logger.exception("Passthrough %s failed", upstream_path)
+        return Response(content="Upstream request failed.", status_code=502)
