@@ -37,6 +37,7 @@ from headroom.proxy.body_forwarding import (
     prepare_outbound_body_bytes as prepare_outbound_body_bytes,  # noqa: F401 - compatibility export
 )
 from headroom.proxy.body_forwarding import serialize_body_canonical
+from headroom.proxy.tool_name_policy import extract_tool_name
 
 if TYPE_CHECKING:
     import httpx
@@ -2190,19 +2191,7 @@ def _extract_tool_name(tool_definition: dict[str, Any]) -> str | None:
       * Anthropic native: ``{"type": "memory_20250818", "name": "memory"}``
       * OpenAI function: ``{"type": "function", "function": {"name": "memory_save", ...}}``
     """
-    name = tool_definition.get("name")
-    if isinstance(name, str) and name:
-        return name
-    fn = tool_definition.get("function")
-    if isinstance(fn, dict):
-        fn_name = fn.get("name")
-        if isinstance(fn_name, str) and fn_name:
-            return fn_name
-    # Native memory tool with no explicit name uses ``type`` as its identifier.
-    type_val = tool_definition.get("type")
-    if isinstance(type_val, str) and type_val:
-        return type_val
-    return None
+    return extract_tool_name(tool_definition)
 
 
 def apply_session_sticky_memory_tools(
