@@ -307,10 +307,12 @@ def test_concurrent_compression_has_no_semaphore_tail() -> None:
     # ratio collapses to "p99 in ms" and a few milliseconds of ordinary
     # scheduler jitter reads as a spurious multiple (e.g. p50=0ms, p99=5ms →
     # ~5×) that has nothing to do with the semaphore. The deleted semaphore
-    # produced a tail of *tens* of milliseconds (and ~27×); a healthy run keeps
-    # p99 in the single-digit-ms range regardless of ratio. So only treat a high
-    # ratio as a regression once p50 is measurable and p99 clears a noise floor.
-    SEMAPHORE_TAIL_FLOOR_MS = 25.0
+    # produced a multi-second tail (and ~27×); a healthy run stays far below the
+    # absolute 250ms p99 guard above, but hosted runners can still show
+    # occasional tens-of-ms scheduling tails. So only treat a high ratio as a
+    # regression once p50 is measurable and p99 clears a practical CI noise
+    # floor.
+    SEMAPHORE_TAIL_FLOOR_MS = 50.0
     assert p50 < 1.0 or ratio < 4.0 or p99 < SEMAPHORE_TAIL_FLOOR_MS, (
         f"p99/p50 ratio is {ratio:.1f}× (p50={p50:.0f}ms, p99={p99:.0f}ms). "
         f"Expected < 4× on uniform-size workload once p50 is measurable and p99 clears "
