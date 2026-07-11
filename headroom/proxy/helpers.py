@@ -24,6 +24,15 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from headroom import paths as _paths
 from headroom._subprocess import run
+from headroom.proxy.beta_header_policy import (
+    BETA_HEADER_STICKY_DEFAULT,
+    BETA_HEADER_STICKY_ENV,
+    BETA_TRACKER_MAX_SESSIONS_DEFAULT,
+    BETA_TRACKER_MAX_SESSIONS_ENV,
+    BetaHeaderStickyMode,
+    resolve_beta_header_sticky_mode,
+    resolve_beta_tracker_max_sessions,
+)
 from headroom.proxy.body_forwarding import (
     BodyMutationTracker as BodyMutationTracker,  # noqa: F401 - compatibility export
 )
@@ -37,15 +46,6 @@ from headroom.proxy.body_forwarding import (
     prepare_outbound_body_bytes as prepare_outbound_body_bytes,  # noqa: F401 - compatibility export
 )
 from headroom.proxy.body_forwarding import serialize_body_canonical
-from headroom.proxy.beta_header_policy import (
-    BETA_HEADER_STICKY_DEFAULT,
-    BETA_HEADER_STICKY_ENV,
-    BETA_TRACKER_MAX_SESSIONS_DEFAULT,
-    BETA_TRACKER_MAX_SESSIONS_ENV,
-    BetaHeaderStickyMode,
-    resolve_beta_header_sticky_mode,
-    resolve_beta_tracker_max_sessions,
-)
 
 if TYPE_CHECKING:
     import httpx
