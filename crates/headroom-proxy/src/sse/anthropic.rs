@@ -48,6 +48,18 @@ use serde_json::Value;
 
 use super::framing::SseEvent;
 
+/// Strip `[1m]` context-window tier suffix from model IDs.
+/// The Headroom CLI appends `[1m]` to signal 1M context to Claude Code,
+/// but the Anthropic API doesn't recognize this suffix. This function
+/// removes it before forwarding upstream. Mirrors the Python proxy's
+/// `sanitize_anthropic_model_id()` (PR #1840, fixes issue #1812).
+#[allow(dead_code)]
+fn sanitize_model_id(model: &str) -> String {
+    model
+        .trim_end_matches("[1m]")
+        .to_string()
+}
+
 /// Streaming-stream-level status. `Open` is the steady state during
 /// streaming. `MessageStop` and `Errored` are terminal — pushing more
 /// events is logged but does not panic.

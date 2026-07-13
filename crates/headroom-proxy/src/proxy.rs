@@ -10,8 +10,6 @@ use axum::http::{HeaderMap, HeaderName, Request, Response, StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::routing::{any, get, post};
 use axum::Router;
-#[cfg(test)]
-use bytes::Bytes;
 use futures_util::{StreamExt as _, TryStreamExt};
 #[cfg(test)]
 use http_body_util::BodyExt;
@@ -614,6 +612,11 @@ pub(crate) async fn forward_http(
                 )));
             }
         };
+
+        // Sanitize `[1m]` context-window suffix from model IDs before processing.
+        // The Headroom CLI adds this suffix to signal 1M context to Claude Code,
+        // but the Anthropic API doesn't recognize it. (PR #1840, fixes #1812)
+        let buffered = sanitize_request_model_id(buffered);
 
         // PR-C2: dispatch on the endpoint classification so each
         // provider hits its own live-zone walker. PR-B2/B3/B4 wired
@@ -1569,6 +1572,35 @@ async fn run_sse_state_machine(
         }
         SseStreamKind::None => {}
     }
+}
+
+/// Sanitize `[1m]` context-window tier suffix from model IDs in request bodies.
+/// The Headroom CLI appends `[1m]` to signal 1M context to Claude Code,
+/// but the Anthropic API doesn't recognize this suffix. This function
+/// removes it before forwarding upstream. Mirrors the Python proxy's
+/// `sanitize_anthropic_model_id()` (PR #1840, fixes issue #1812).
+fn sanitize_request_model_id(body: bytes::Bytes) -> bytes::Bytes {
+    // Try to parse the body as JSON. If it fails, return unchanged.
+    let Ok(mut parsed) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return body;
+    };
+
+    // Sanitize the "model" field if it exists and is a string.
+    if let Some(model_value) = parsed.get_mut("model") {
+        if let serde_json::Value::String(model) = model_value {
+            let sanitized = model.trim_end_matches("[1m]").to_string();
+            if sanitized != *model {
+                *model_value = serde_json::Value::String(sanitized);
+                // Re-serialize and return the sanitized body.
+                if let Ok(sanitized_bytes) = serde_json::to_vec(&parsed) {
+                    return bytes::Bytes::from(sanitized_bytes);
+                }
+            }
+        }
+    }
+
+    // If no sanitization occurred, return the original body unchanged.
+    body
 }
 
 fn ensure_request_id(headers: &HeaderMap) -> String {
