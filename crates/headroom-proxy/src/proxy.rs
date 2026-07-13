@@ -12,6 +12,8 @@ use axum::routing::{any, get, post};
 use axum::Router;
 use futures_util::{StreamExt as _, TryStreamExt};
 #[cfg(test)]
+use bytes::Bytes;
+#[cfg(test)]
 use http_body_util::BodyExt;
 
 use crate::cache_stabilization;
@@ -613,11 +615,6 @@ pub(crate) async fn forward_http(
             }
         };
 
-        // Sanitize `[1m]` context-window suffix from model IDs before processing.
-        // The Headroom CLI adds this suffix to signal 1M context to Claude Code,
-        // but the Anthropic API doesn't recognize it. (PR #1840, fixes #1812)
-        let buffered = sanitize_request_model_id(buffered);
-
         // PR-C2: dispatch on the endpoint classification so each
         // provider hits its own live-zone walker. PR-B2/B3/B4 wired
         // the Anthropic dispatcher; PR-C2 adds the OpenAI Chat
@@ -634,6 +631,26 @@ pub(crate) async fn forward_http(
         // - Anthropic: no extra skip rules at this layer.
         let endpoint = compression::classify_compressible_path(uri.path())
             .expect("is_compressible_path guarded above");
+
+        // PR-2027: strip the `[1m]` context-window tier suffix from
+        // the request body for Anthropic messages only. The
+        // Headroom CLI appends `[1m]` to model IDs (e.g.
+        // `glm-5.2[1m]`, `claude-3-7-sonnet[1m]`) to signal 1M
+        // context to Claude Code; the upstream Anthropic API does
+        // not recognize the suffix and rejects the request. The
+        // suffix is an Anthropic/Claude Code compatibility marker,
+        // so we must not silently mutate OpenAI-compatible
+        // request model IDs. The sanitizer is gated on the
+        // already-classified `endpoint`, which is the same source
+        // of truth the dispatcher uses below — keeping the gate
+        // and the dispatch in lockstep.
+        let buffered = match endpoint {
+            compression::CompressibleEndpoint::AnthropicMessages => {
+                compression::sanitize_anthropic_model_id_in_body(buffered)
+            }
+            compression::CompressibleEndpoint::OpenAiChatCompletions
+            | compression::CompressibleEndpoint::OpenAiResponses => buffered,
+        };
 
         // PR-E5 + PR-E6: cache-stabilization observability hooks.
         // Both run READ-ONLY against the buffered body and emit
@@ -1572,35 +1589,6 @@ async fn run_sse_state_machine(
         }
         SseStreamKind::None => {}
     }
-}
-
-/// Sanitize `[1m]` context-window tier suffix from model IDs in request bodies.
-/// The Headroom CLI appends `[1m]` to signal 1M context to Claude Code,
-/// but the Anthropic API doesn't recognize this suffix. This function
-/// removes it before forwarding upstream. Mirrors the Python proxy's
-/// `sanitize_anthropic_model_id()` (PR #1840, fixes issue #1812).
-fn sanitize_request_model_id(body: bytes::Bytes) -> bytes::Bytes {
-    // Try to parse the body as JSON. If it fails, return unchanged.
-    let Ok(mut parsed) = serde_json::from_slice::<serde_json::Value>(&body) else {
-        return body;
-    };
-
-    // Sanitize the "model" field if it exists and is a string.
-    if let Some(model_value) = parsed.get_mut("model") {
-        if let serde_json::Value::String(model) = model_value {
-            let sanitized = model.trim_end_matches("[1m]").to_string();
-            if sanitized != *model {
-                *model_value = serde_json::Value::String(sanitized);
-                // Re-serialize and return the sanitized body.
-                if let Ok(sanitized_bytes) = serde_json::to_vec(&parsed) {
-                    return bytes::Bytes::from(sanitized_bytes);
-                }
-            }
-        }
-    }
-
-    // If no sanitization occurred, return the original body unchanged.
-    body
 }
 
 fn ensure_request_id(headers: &HeaderMap) -> String {
